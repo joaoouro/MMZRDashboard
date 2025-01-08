@@ -3,16 +3,6 @@ import camelot
 import os
 
 def processar_tabelas_pdf_camelot(pdf_path: str, pagina_index: int) -> pd.DataFrame:
-    """
-    Processa tabelas de um arquivo PDF usando Camelot.
-    
-    Args:
-        pdf_path (str): Caminho do arquivo PDF.
-        pagina_index (int): Número da página a ser processada.
-    
-    Returns:
-        pd.DataFrame: DataFrame contendo os dados da tabela processada ou None se não houver tabelas.
-    """
     try:
         tabelas = camelot.read_pdf(
             pdf_path,

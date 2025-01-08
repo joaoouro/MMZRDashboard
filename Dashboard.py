@@ -1,82 +1,126 @@
+from typing import List, Tuple, Optional
 import streamlit as st
 import pandas as pd
-import os
+import io
 from pdf_to_excel import processar_tabelas_pdf_camelot
 
-# Configuração do layout do Streamlit
-st.set_page_config(
-    page_title="PDF to Excel Dashboard",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+TITULO = "📊 PDF para Excel - Dashboard"
+CONFIGURACAO_PAGINA = {
+    "page_title": "PDF para Excel Dashboard",
+    "layout": "wide",
+    "initial_sidebar_state": "expanded"
+}
+TIPOS_ARQUIVO_PERMITIDOS = ["pdf"]
 
-st.title("📊 PDF para Excel - Dashboard")
+class EstadoDashboard:
+    """Gerencia as variáveis de estado do dashboard."""
+    
+    def __init__(self):
+        if "resetar" not in st.session_state:
+            st.session_state["resetar"] = False
+        if "chave_widget" not in st.session_state:
+            st.session_state["chave_widget"] = 0
+        if "dados_processados" not in st.session_state:
+            st.session_state["dados_processados"] = None
 
-# Sidebar para configurações
-st.sidebar.header("Configurações")
-uploaded_file = st.sidebar.file_uploader("Carregue o arquivo PDF", type=["pdf"])
+    def resetar(self) -> None:
+        """Reseta o estado do dashboard."""
+        st.session_state["resetar"] = True
+        st.session_state["chave_widget"] += 1
+        st.session_state["dados_processados"] = None
 
-# Entrada de texto para as páginas
-paginas_input = st.sidebar.text_input("Insira as páginas a serem processadas (separe por vírgulas):")
+def configurar_pagina() -> None:
+    """Configura as definições iniciais da página."""
+    st.set_page_config(**CONFIGURACAO_PAGINA)
+    st.title(TITULO)
 
-if uploaded_file is not None:
-    # Salvar o arquivo PDF carregado em um diretório temporário
-    temp_dir = "temp"
-    os.makedirs(temp_dir, exist_ok=True)
-    temp_pdf_path = os.path.join(temp_dir, uploaded_file.name)
+def processar_pdf(arquivo_carregado: io.BytesIO, paginas_input: str) -> Optional[List[Tuple[int, pd.DataFrame]]]:
+    """
+    Processa o arquivo PDF carregado e extrai tabelas.
+    
+    Args:
+        arquivo_carregado: O arquivo PDF carregado
+        paginas_input: String contendo números de página separados por vírgula
+        
+    Returns:
+        Lista de tuplas contendo número da página e DataFrame correspondente
+    """
+    try:
+        if not paginas_input.strip():
+            raise ValueError("A lista de páginas está vazia.")
+        
+        indices_pagina = [int(p.strip()) for p in paginas_input.split(",") if p.strip().isdigit()]
+        
+        if not indices_pagina:
+            raise ValueError("Nenhuma página válida foi encontrada.")
 
-    with open(temp_pdf_path, "wb") as temp_file:
-        temp_file.write(uploaded_file.getbuffer())
+        nome_arquivo = arquivo_carregado.name.replace(".pdf", "")
+        tabelas_processadas = []
 
-    st.sidebar.success(f"Arquivo {uploaded_file.name} carregado com sucesso!")
-
-    if st.sidebar.button("Processar PDF"):
-        try:
-            # Processar a entrada das páginas
-            if not paginas_input.strip():
-                raise ValueError("A lista de páginas está vazia.")
+        for indice_pagina in indices_pagina:
+            st.write(f"Processando página {indice_pagina}...")
+            df = processar_tabelas_pdf_camelot(arquivo_carregado, indice_pagina)
             
-            # Limpar a entrada e converter em uma lista de inteiros
-            pagina_indices = [int(p.strip()) for p in paginas_input.split(",") if p.strip().isdigit()]
-
-            if not pagina_indices:
-                raise ValueError("Nenhuma página válida foi encontrada.")
-
-            nome_do_arquivo = os.path.splitext(uploaded_file.name)[0]
-            tabelas_processadas = []
-
-            # Processar cada página
-            for pagina_index in pagina_indices:
-                st.write(f"Processando página {pagina_index}...")
-                df = processar_tabelas_pdf_camelot(temp_pdf_path, pagina_index)
-
-                if df is not None:
-                    tabelas_processadas.append((pagina_index, df))
-                else:
-                    st.warning(f"Nenhuma tabela encontrada na página {pagina_index}.")
-
-            # Exibir as tabelas no dashboard
-            if tabelas_processadas:
-                st.header("📋 Dados Extraídos")
-                for pagina_index, df in tabelas_processadas:
-                    st.subheader(f"Dados da Página {pagina_index}")
-                    st.dataframe(df)
-
-                    # Salvar o arquivo Excel
-                    output_file = os.path.join(temp_dir, f"{nome_do_arquivo}_pagina{pagina_index}.xlsx")
-                    df.to_excel(output_file, index=False)
-
-                    # Botão de download
-                    with open(output_file, "rb") as excel_file:
-                        st.download_button(
-                            label=f"Baixar Excel - Página {pagina_index}",
-                            data=excel_file,
-                            file_name=f"{nome_do_arquivo}_pagina{pagina_index}.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        )
+            if df is not None:
+                tabelas_processadas.append((indice_pagina, df))
             else:
-                st.error("Nenhuma tabela foi encontrada nas páginas especificadas.")
-        except ValueError as e:
-            st.sidebar.error(f"Erro: {e}")
-else:
-    st.sidebar.info("Carregue um PDF para começar.")
+                st.warning(f"Nenhuma tabela encontrada na página {indice_pagina}.")
+
+        st.session_state["nome_arquivo"] = nome_arquivo
+        return tabelas_processadas
+
+    except ValueError as e:
+        st.sidebar.error(f"Erro: {e}")
+        return None
+
+def exibir_resultados(dados_processados: List[Tuple[int, pd.DataFrame]]) -> None:
+    """Exibe os dados processados e botões de download."""
+    st.header("📋 Dados Extraídos")
+    for indice_pagina, df in dados_processados:
+        st.subheader(f"Dados da Página {indice_pagina}")
+        st.dataframe(df)
+
+        buffer = io.BytesIO()
+        df.to_excel(buffer, index=False, engine='openpyxl')
+        buffer.seek(0)
+
+        st.download_button(
+            label=f"Baixar Excel - Página {indice_pagina}",
+            data=buffer,
+            file_name=f"{st.session_state['nome_arquivo']}_pagina{indice_pagina}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+def principal():
+    """Função principal do aplicativo."""
+    configurar_pagina()
+    estado_dashboard = EstadoDashboard()
+
+    # Configuração da barra lateral
+    st.sidebar.header("Configurações")
+    arquivo_carregado = st.sidebar.file_uploader(
+        "Carregue o arquivo PDF",
+        type=TIPOS_ARQUIVO_PERMITIDOS,
+        key=f"carregador_arquivo_{st.session_state['chave_widget']}"
+    )
+    paginas_input = st.sidebar.text_input(
+        "Insira as páginas a serem processadas (separe por vírgulas):",
+        key=f"entrada_texto_{st.session_state['chave_widget']}"
+    )
+
+    if arquivo_carregado is not None and st.session_state["dados_processados"] is None:
+        st.sidebar.success(f"Arquivo {arquivo_carregado.name} carregado com sucesso!")
+        
+        if st.sidebar.button("Processar PDF"):
+            st.session_state["dados_processados"] = processar_pdf(arquivo_carregado, paginas_input)
+
+    if st.session_state["dados_processados"]:
+        exibir_resultados(st.session_state["dados_processados"])
+        
+        st.markdown("---")
+        if st.button("Iniciar Novo Processo"):
+            estado_dashboard.resetar()
+            st.rerun()
+
+if __name__ == "__main__":
+    principal()
