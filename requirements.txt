@@ -2,4 +2,3 @@ streamlit
 pandas
 camelot-py[cv]
 pdfplumber
-io
